@@ -1,0 +1,238 @@
+#!/bin/bash
+
+############################################################
+# Default Values                                           #
+############################################################
+NGINX_LOG=(/var/log/nginx/access.log /var/log/nginx/error.log)
+
+############################################################
+# Help                                                     #
+############################################################
+HELP="$(basename $0) Syntax-->[-h] [-v] [-p DEPLOY_DIR ] [-b DB] [-i PROJECT_ID] [-ncdxr]
+Download and extract new deployments of CI4 based websites.
+where:
+    -h  Show this help text (optional | exit script).
+
+    -v  Display verbose info (optional | set at first to show all verbose info).
+
+    -i  Add your IP address to ingoreip"
+
+############################################################
+# Get The Options                                          #
+############################################################
+while getopts ":hvn:i:" option; do
+   case $option in
+      h) # Display Help
+        echo "$HELP"; exit;;
+      v) # Show verbose
+        VERBOSE=true;;
+      n) # Activate nginx filters
+        NGINX=true; NGINX_LOG+=("$OPTARG");;
+      i) # Give IP
+        IP=$OPTARG;;
+     \?) # Invalid option
+        echo "Error: Invalid option"; exit;;
+   esac
+done
+
+############################################################
+# Main program                                             #
+############################################################
+
+# Write fail2ban nginx-badbots
+cat << 'EOF' > /etc/fail2ban/filter.d/nginx-badbots.conf
+[Definition]
+badbotscustom = l9explore/1\.3\.0|EmailCollector|WebEMailExtrac|TrackBack/1\.02|sogou music spider|(?:Mozilla/\d+\.\d+ )?Jorgee
+badbots = Atomic_Email_Hunter/4\.0|atSpider/1\.0|autoemailspider|bwh3_user_agent|China Local Browse 2\.6|ContactBot/0\.2|ContentSmartz|DataCha0s/2\.0|DBrowse 1\.4b|DBrowse 1\.4d|Demo Bot DOT 16b|Demo Bot Z 16b|DS>
+failregex = (?i)<HOST> -.*"(GET|POST|HEAD) (.*?)" \d+ \d+ "(.*?)" ".*(?:%(badbots)s|%(badbotscustom)s).*"$
+ignoreregex =
+datepattern = ^[^\[]*\[({DATE})
+              {^LN-BEG}
+EOF
+
+# Write fail2ban nginx-badrequest
+cat << 'EOF' > /etc/fail2ban/filter.d/nginx-badrequest.conf
+[Definition]
+failregex = ^<HOST> \- \S+ \[\] \"(GET|POST|HEAD) .+(setup\.cgi|cgi-bin).+$
+            ^<HOST> \- \S+ \[\] \"(GET|POST|HEAD) .+XDEBUG.+$
+            ^<HOST> \- \S+ \[\] \"(GET|POST|HEAD) .+stalker_portal.+$
+            ^<HOST> .* ".*\\x.*" .*$
+ignoreregex =
+datepattern = {^LN-BEG}%%ExY(?P<_sep>[-/.])%%m(?P=_sep)%%d[T ]%%H:%%M:%%S(?:[.,]%%f)?(?:\s*%%z)?
+              ^[^\[]*\[({DATE})
+              {^LN-BEG}
+EOF
+
+# Write fail2ban nginx-botsearch
+cat << 'EOF' > /etc/fail2ban/filter.d/nginx-botsearch.conf
+[Definition]
+all = \/?.[^,]*
+failregex = ^<HOST> \- \S+ \[\] \"(GET|POST|HEAD) \/<all> \S+\" 404 .+$
+            ^ \[error\] \d+#\d+: \*\d+ (\S+ )?\"\S+\" (failed|is not found) \(2\: No such file or directory\), client\: <HOST>\, server\: \S*\, request: \"(GET|POST|HEAD) \/<all> \S+\"\, .*?$
+ignoreregex = ^<HOST> \- \S+ \[\] \"(GET|POST|HEAD) .+\.(jpg|jpeg|png|svg|ico) \S+\" 404 .+$
+datepattern = {^LN-BEG}%%ExY(?P<_sep>[-/.])%%m(?P=_sep)%%d[T ]%%H:%%M:%%S(?:[.,]%%f)?(?:\s*%%z)?
+              ^[^\[]*\[({DATE})
+              {^LN-BEG}
+EOF
+
+# Write fail2ban nginx-http-auth
+cat << 'EOF' > /etc/fail2ban/filter.d/nginx-http-auth.conf
+[Definition]
+failregex = ^ \[error\] \d+#\d+: \*\d+ user "(?:[^"]+|.*?)":? (?:password mismatch|was not found in "[^\"]*"), client: <HOST>, server: \S*, request: "\S+ \S+ HTTP/\d+\.\d+", host: "\S+"(?:, referrer: "\S+")?\s*$
+ignoreregex =
+datepattern = {^LN-BEG}
+EOF
+
+# Write fail2ban nginx-limit-req
+cat << 'EOF' > /etc/fail2ban/filter.d/nginx-limit-req.conf
+[Definition]
+ngx_limit_req_zones = [^"]+
+failregex = ^\s*\[[a-z]+\] \d+#\d+: \*\d+ limiting requests, excess: [\d\.]+ by zone "(?:%(ngx_limit_req_zones)s)", client: <HOST>,
+ignoreregex =
+datepattern = {^LN-BEG}
+EOF
+
+# Write fail2ban nginx-noproxy
+cat << 'EOF' > /etc/fail2ban/filter.d/nginx-noproxy.conf
+[Definition]
+failregex = ^<HOST> -.*GET http.*
+ignoreregex =
+EOF
+
+# Write fail2ban nginx-noscript
+cat << 'EOF' > /etc/fail2ban/filter.d/nginx-noscript.conf
+[Definition]
+failregex = ^<HOST> -.*GET.*(\.asp|\.exe|\.pl|\.cgi|\.scgi|\.env)
+ignoreregex =
+EOF
+
+# Write fail2ban nginx-wordpress
+cat << 'EOF' > /etc/fail2ban/filter.d/nginx-noscript.conf
+[Definition]
+failregex = ^<HOST> .* "POST /wp-login.php
+            ^<HOST> .* "POST /wp/wp-login.php
+            ^<HOST> .* "POST .*xmlrpc.php
+ignoreregex =
+EOF
+
+
+# Verbose Info
+if [ "$VERBOSE" = "true" ] ; then
+  echo "Writing filters done..."
+fi
+
+# Write fail2ban jail.local
+cat << EOF > /etc/fail2ban/jail.local
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 3
+findtime = 300
+bantime = 3600
+
+EOF
+
+if [ "$NGINX" = "true" ] ; then
+cat << EOF >> /etc/fail2ban/jail.local
+[nginx-badbots]
+enabled  = true
+port     = http,https
+filter   = nginx-badbots
+logpath  = ${NGINX_LOG[1]}
+maxretry = 1
+findtime = 1d
+bantime = 4w
+
+[nginx-badrequest]
+enabled  = true
+port     = http,https
+filter   = nginx-badrequest
+logpath  = ${NGINX_LOG[1]}
+maxretry = 1
+findtime = 1d
+bantime = 4w
+
+[nginx-botsearch]
+enabled  = true
+port     = http,https
+filter   = nginx-botsearch
+logpath  = ${NGINX_LOG[1]}
+maxretry = 4
+findtime = 1d
+bantime = 1d
+
+[nginx-http-auth]
+enabled  = true
+port     = http,https
+filter   = nginx-http-auth
+logpath  = ${NGINX_LOG[2]}
+maxretry = 3
+findtime = 1d
+bantime = 3600
+
+[nginx-limit-req]
+enabled  = true
+port     = http,https
+filter   = nginx-limit-req
+logpath  = ${NGINX_LOG[2]}
+maxretry = 10
+findtime = 600
+bantime  = 3600
+
+[nginx-noproxy]
+enabled  = true
+port     = http,https
+filter   = nginx-noproxy
+logpath  = ${NGINX_LOG[1]}
+maxretry = 2
+findtime = 1d
+bantime = 4w
+
+[nginx-noscript]
+enabled  = true
+port     = http,https
+filter   = nginx-noscript
+logpath  = ${NGINX_LOG[1]}
+maxretry = 1
+findtime = 1d
+bantime = 4w
+
+[nginx-wordpress]
+enabled = true
+port    = http,https
+filter  = nginx-wordpress
+logpath = ${NGINX_LOG[1]}
+maxretry = 8
+findtime = 600
+bandtime = 3600
+
+EOF
+
+  # Verbose Info
+  if [ "$VERBOSE" = "true" ] ; then
+    echo "Writing nginx filters to jail.local done..."
+  fi
+fi
+
+# Add ingoreip
+if [ ! "$IP" ]; then
+  echo "ERROR: option -i must be provided with arguments"
+  echo "$HELP" >&2; exit 1
+elif [ "$IP" ]; then
+  find /etc/fail2ban/jail.conf -type f -exec sed -i 's/#ignoreip = 127.0.0.1\/8 ::1/ignoreip = '"$IP"'/g' {} \;
+fi
+
+# Verbose Info
+if [ "$VERBOSE" = "true" ] ; then
+  echo "$IP added to ingoreip in jail.conf"
+fi
+
+# Restart fail2ban
+service fail2ban restart
+
+# Verbose Info
+if [ "$VERBOSE" = "true" ] ; then
+  echo "Fail to ban restarted"
+fi
