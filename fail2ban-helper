@@ -115,6 +115,13 @@ failregex = ^<HOST> .* "POST /wp-login.php
 ignoreregex =
 EOF
 
+# Write fail2ban nginx-x00
+cat << 'EOF' > /etc/fail2ban/filter.d/nginx-x00.conf
+[Definition]
+failregex = ^<HOST> .* ".*\\x.*" .*$
+ignoreregex =
+EOF
+
 
 # Verbose Info
 if [ "$VERBOSE" = "true" ] ; then
@@ -208,6 +215,14 @@ maxretry = 8
 findtime = 600
 bandtime = 3600
 
+[nginx-x00]
+enabled  = true
+port     = http,https
+filter   = nginx-x00
+logpath  = ${NGINX_LOG[1]}
+maxretry = 1
+findtime = 1d
+bantime = 4w
 EOF
 
   # Verbose Info
