@@ -128,8 +128,21 @@ if [ "$VERBOSE" = "true" ] ; then
   echo "Writing filters done..."
 fi
 
+# Add ingoreip
+if [ "$IP" ]; then
+cat << EOF >> /etc/fail2ban/jail.local
+[DEFAULT]
+ignoreip = $IP
+
+EOF
+  # Verbose Info
+  if [ "$VERBOSE" = "true" ] ; then
+    echo "$IP added to ingoreip in jail.conf"
+  fi
+fi
+
 # Write fail2ban jail.local
-cat << EOF > /etc/fail2ban/jail.local
+cat << EOF >> /etc/fail2ban/jail.local
 [sshd]
 enabled = true
 port = ssh
@@ -137,7 +150,7 @@ filter = sshd
 logpath = /var/log/auth.log
 maxretry = 3
 findtime = 300
-bantime = 3600
+bantime = 1d
 
 EOF
 
@@ -229,19 +242,6 @@ EOF
   if [ "$VERBOSE" = "true" ] ; then
     echo "Writing nginx filters to jail.local done..."
   fi
-fi
-
-# Add ingoreip
-if [ ! "$IP" ]; then
-  echo "ERROR: option -i must be provided with arguments"
-  echo "$HELP" >&2; exit 1
-elif [ "$IP" ]; then
-  find /etc/fail2ban/jail.conf -type f -exec sed -i 's/#ignoreip = 127.0.0.1\/8 ::1/ignoreip = '"$IP"'/g' {} \;
-fi
-
-# Verbose Info
-if [ "$VERBOSE" = "true" ] ; then
-  echo "$IP added to ingoreip in jail.conf"
 fi
 
 # Restart fail2ban
