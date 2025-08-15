@@ -15,7 +15,9 @@ where:
 
     -v  Display verbose info (optional | set at first to show all verbose info).
 
-    -i  Add your IP address to ingoreip"
+    -i  Add your IP address to ingoreip
+
+    -n  Activate additional nginx filters. "
 
 ############################################################
 # Get The Options                                          #
